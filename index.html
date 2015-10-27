@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>HTML5 Uploader</title>
+	<script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+	<style>
+	#file{width:66px;height:32px;}
+	.file_box{margin:5px 5px;padding:5px 5px;border:1px solid #eee;min-width:300px;max-width:600px;}
+	.file_name{float:left;width:80%;min-width:240px;overflow:hidden}
+	.file_status{float:left;width:20%;min-width:60px;text-align:right;}
+	.file_progress{height:2px;background:green;clear:both;width:0;}
+	</style>
+</head>
+<body>
+	<div class="box">
+		<input type="file" id="file" name="file" multiple="multiple">
+	</div>
+	<div id="queue">
+		
+	</div>
+	
+	<script type="text/javascript">
+	var posturl = '/upload.php';
+	var chunksize = 2097152;
+	var reader = null;
+	var upload_num = 0;
+	
+	function fmtsize(size){
+		var unit = ["Bytes","KB","MB","GB"];
+		var i = parseInt(Math.log(size)/Math.log(1024));
+		return (size/Math.pow(1024,i)).toFixed(1) + " " + unit[i];
+	}
+	
+	function addfile(file, n){
+		var html = '<div class="file_box">'
+			+ '<div class="file_name">'+ file.name +'</div>'
+			+ '<div class="file_status" id="file_status_'+ n +'">'+ fmtsize(file.size) +'</div>'
+			+ '<div class="file_progress" id="file_progress_'+ n +'"></div>'
+			+ '</div>';
+		$('#queue').append(html);
+	}
+	
+	var startqueue = function(){
+		var files = $("#file").prop('files');
+		$('#queue').html('');
+		for(var i=0;i<files.length;i++){
+			addfile(files[i], i);
+		}
+		
+		upload_num = 0;
+		startupload();
+	}
+	
+	function startupload(){
+		$("#file").attr("disabled","disabled");
+		
+		var files = $("#file").prop('files');
+		if(upload_num < files.length){
+			var f = files[upload_num];
+			$.ajax({
+				url:posturl,   
+				type: 'POST',
+				data: {name:f.name,size:f.size,start:0},
+				success:function(res){
+					if(res > 0){
+						upload(f, upload_num, res);
+					}
+					upload_num++;
+				},
+				error:function(e, textStatus, errorThrown){
+					alert("Error: " + textStatus);
+				}
+			});
+		}else{
+			$("#file").removeAttr("disabled");
+		}
+	}
+	
+	function upload(file, n, left){
+		if(!reader){
+			reader = new FileReader();
+		}
+		
+		reader.onloadstart = function(e){
+			var start = file.size - left;
+			var len = (left > chunksize ? chunksize : left);
+			var end = start + len;
+			
+			var fData = new FormData();
+			fData.append("file",file.slice(start, end));
+			fData.append("name",file.name);
+			fData.append("size",file.size);
+			fData.append("start",start);
+			fData.append("end",end);
+			
+			var xhr = new XMLHttpRequest();
+			var OnProgress = function(e){
+				var uploaded = file.size - left + e.loaded; //nearly
+				if(uploaded <= file.size){
+					var percent = (100*uploaded/file.size).toFixed(0)+ '%';
+				}else{
+					var percent = '100%';
+				}
+				$("#file_status_" + n).html(percent);
+				$("#file_progress_" + n).width(percent);
+			}
+			var Onload = function(e){
+				var left = parseInt(xhr.responseText);
+				if(left > 0){
+					upload(file, n, left);
+				}else{
+					reader = null;
+					$("#file_status_" + n).html('Complete');
+					startupload();
+				}
+			}
+			var Onerror = function(e){
+				$("#file_status_" + n).html('Failed');
+			}
+			var Onabort = function(e){
+				$("#file_status_" + n).html('Aborted');
+			}
+			
+			xhr.upload.addEventListener('progress',OnProgress,false);
+			xhr.addEventListener("load",Onload,false);
+			xhr.addEventListener("error",Onerror,false);
+			xhr.addEventListener("abort",Onabort,false);
+			xhr.open("POST", posturl);
+			xhr.send(fData);
+		};
+		
+		reader.readAsBinaryString(file);
+	}
+	
+	$("#file").change(startqueue);
+	</script>
+</body>
+</html>
